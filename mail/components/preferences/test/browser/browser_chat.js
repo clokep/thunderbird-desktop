@@ -8,6 +8,9 @@ var { MockFilePicker } = ChromeUtils.importESModule(
 var { MockSound } = ChromeUtils.importESModule(
   "resource://testing-common/MockSound.sys.mjs"
 );
+var { UIDensity } = ChromeUtils.importESModule(
+  "resource:///modules/UIDensity.sys.mjs"
+);
 
 add_task(async () => {
   await testCheckboxes(
@@ -152,10 +155,33 @@ add_task(async function testMessageStylePreview() {
     message = message.nextElementSibling;
   }
   is(messages.size, 3, "All 3 messages displayed");
+
   Assert.deepEqual(
     Array.from(messages, previewMessage => previewMessage.displayMessage),
     expectedMessages,
     "The preview messages should be localized with Fluent"
   );
+
+  const previewDoc = subject.contentDocument;
+  for (const stylesheet of [
+    "chrome://messenger/skin/colors.css",
+    "chrome://messenger/skin/layout.css",
+    "chrome://messenger/skin/spacings.css",
+    "chrome://chat/skin/conv.css",
+  ]) {
+    Assert.ok(
+      previewDoc.querySelector(`link[href="${stylesheet}"]`),
+      `${stylesheet} is linked in the preview document`
+    );
+  }
+
+  await SpecialPowers.pushPrefEnv({
+    set: [["mail.uidensity", UIDensity.MODE_TOUCH]],
+  });
+  await TestUtils.waitForCondition(
+    () => previewDoc.documentElement.getAttribute("uidensity") === "touch",
+    "density is mirrored to the preview document"
+  );
+
   await closePrefsTab();
 });

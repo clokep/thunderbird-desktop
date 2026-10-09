@@ -821,6 +821,9 @@ export function initHTMLDocument(aConv, aTheme, aDoc) {
   }
   addCSS("chrome://chat/skin/conv.css");
   addCSS("chrome://messenger/skin/icons.css");
+  addCSS("chrome://messenger/skin/colors.css");
+  addCSS("chrome://messenger/skin/layout.css");
+  addCSS("chrome://messenger/skin/spacings.css");
 
   // add css to handle DefaultFontFamily and DefaultFontSize
   let cssText = "";

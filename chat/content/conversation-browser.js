@@ -162,6 +162,8 @@
       this.addEventListener("scroll", this.browserScroll);
       this.addEventListener("resize", this.browserResize);
 
+      window.addEventListener("uidensitychange", this);
+
       // @implements {nsIObserver}
       this.prefObserver = () => {
         if (this.magicCopyEnabled) {
@@ -243,6 +245,8 @@
             this.theme,
             this.contentDocument
           );
+
+          this.onUIDensityChange();
 
           this._exposeMethodsToContent();
           this.initMagicCopy();
@@ -358,6 +362,8 @@
 
       this.uninitMagicCopy();
 
+      window.removeEventListener("uidensitychange", this);
+
       if (this.contentChatNode) {
         // Remove the listener only if the conversation was initialized.
         this.contentChatNode.removeEventListener(
@@ -374,6 +380,28 @@
       this._convScrollEnabled =
         body.scrollHeight <= body.scrollTop + body.clientHeight + 10;
       return this._convScrollEnabled;
+    }
+
+    onUIDensityChange() {
+      if (!this.contentDocument) {
+        return;
+      }
+      const { documentElement } = this.contentDocument;
+      const hostAttr =
+        window.document.documentElement.getAttribute("uidensity");
+      if (hostAttr) {
+        documentElement.setAttribute("uidensity", hostAttr);
+      } else {
+        documentElement.removeAttribute("uidensity");
+      }
+    }
+
+    handleEvent(event) {
+      switch (event.type) {
+        case "uidensitychange":
+          this.onUIDensityChange();
+          break;
+      }
     }
 
     convScrollEnabled() {

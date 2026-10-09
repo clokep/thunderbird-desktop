@@ -23,6 +23,8 @@ tags = ["notifications"]
 
 ["browser_messageStyle.js"]
 
+["browser_messageThemePlumbing.js"]
+
 ["browser_messagesMail.js"]
 
 ["browser_readMessage.js"]
