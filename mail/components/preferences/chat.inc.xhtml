@@ -139,33 +139,24 @@
     <html:div data-category="paneChat">
     <html:fieldset data-category="paneChat">
       <separator/>
-      <hbox align="center">
-        <label data-l10n-id="theme-label" control="messagestyle-themename"/>
-        <hbox flex="1">
-          <menulist id="messagestyle-themename"
-                    flex="1" crop="end"
-                    preference="messenger.options.messagesStyle.theme"
-                    onselect="previewObserver.currentThemeChanged();">
-            <menupopup id="theme-menupopup">
-              <menuitem id="mail-menuitem"
-                        data-l10n-id="style-mail"
-                        value="mail"/>
-              <menuitem id="bubbles-menuitem"
-                        data-l10n-id="style-bubbles"
-                        value="bubbles"/>
-              <menuitem id="dark-menuitem"
-                        data-l10n-id="style-dark"
-                        value="dark"/>
-              <menuitem id="papersheets-menuitem"
-                        data-l10n-id="style-paper"
-                        value="papersheets"/>
-              <menuitem id="simple-menuitem"
-                        data-l10n-id="style-simple"
-                        value="simple"/>
-            </menupopup>
-          </menulist>
-        </hbox>
+      <hbox>
+        <checkbox id="chatBubbles"
+                  data-l10n-id="chat-bubbles-label"
+                  preference="messenger.options.messagesStyle.bubbles"/>
+        <spacer flex="1"/>
       </hbox>
+      <html:div class="indent">
+        <html:description data-l10n-id="chat-bubbles-description"></html:description>
+      </html:div>
+      <hbox>
+        <checkbox id="chatAvatars"
+                  data-l10n-id="chat-avatars-label"
+                  preference="messenger.options.messagesStyle.avatars"/>
+        <spacer flex="1"/>
+      </hbox>
+      <html:div class="indent">
+        <html:description data-l10n-id="chat-avatars-description"></html:description>
+      </html:div>
       <separator class="thin"/>
       <hbox align="start">
       <label data-l10n-id="preview-label"/>
@@ -181,14 +172,6 @@
           </hbox>
         </vbox>
       </vbox>
-      </hbox>
-      <hbox align="center">
-        <label data-l10n-id="chat-variant-label" control="themevariant"/>
-        <hbox>
-          <menulist id="themevariant"
-                    preference="messenger.options.messagesStyle.variant"
-                    onselect="previewObserver.currentVariantChanged();"/>
-        </hbox>
       </hbox>
     </html:fieldset>
     </html:div>

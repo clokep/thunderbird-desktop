@@ -6,9 +6,6 @@
 
 var { GenericConvIMPrototype, GenericMessagePrototype } =
   ChromeUtils.importESModule("resource:///modules/jsProtoHelper.sys.mjs");
-var { getThemeByName, getThemeVariants } = ChromeUtils.importESModule(
-  "resource:///modules/imThemes.sys.mjs"
-);
 
 var { IMServices } = ChromeUtils.importESModule(
   "resource:///modules/IMServices.sys.mjs"
@@ -43,11 +40,6 @@ Message.prototype = {
     return this.originalMessage;
   },
 };
-
-// Message style tooltips use this.
-function getBrowser() {
-  return document.getElementById("previewbrowser");
-}
 
 var previewObserver = {
   _loaded: false,
@@ -112,124 +104,36 @@ var previewObserver = {
     ];
     previewObserver.conv = conv;
 
-    const themeName = document.getElementById("messagestyle-themename");
     previewObserver.browser = document.getElementById("previewbrowser");
 
     // If the preferences tab is opened straight to the message styles,
     // loading the preview fails. Pushing this to back of the event queue
     // prevents that failure.
     setTimeout(() => {
-      previewObserver.displayTheme(themeName.value);
+      previewObserver.reloadPreview();
       this._loaded = true;
     });
   },
 
-  currentThemeChanged() {
-    if (!this._loaded) {
-      return;
-    }
-
-    const currentTheme = document.getElementById(
-      "messagestyle-themename"
-    ).value;
-    if (!currentTheme) {
-      return;
-    }
-
-    this.displayTheme(currentTheme);
-  },
-
-  _ignoreVariantChange: false,
-  currentVariantChanged() {
-    if (!this._loaded || this._ignoreVariantChange) {
-      return;
-    }
-
-    const variant = document.getElementById("themevariant").value;
-    if (!variant) {
-      return;
-    }
-
-    this.theme.variant = variant;
-    this.reloadPreview();
-  },
-
-  displayTheme(aTheme) {
-    try {
-      this.theme = getThemeByName(aTheme);
-    } catch (e) {
-      const previewBoxBrowser = document
-        .getElementById("previewBox")
-        .querySelector("browser");
-      if (previewBoxBrowser) {
-        previewBoxBrowser.hidden = true;
-      }
-      document.getElementById("noPreviewScreen").hidden = false;
-      return;
-    }
-
-    const menulist = document.getElementById("themevariant");
-    if (menulist.menupopup) {
-      menulist.menupopup.remove();
-    }
-    const popup = menulist.appendChild(document.createXULElement("menupopup"));
-    const variants = getThemeVariants(this.theme);
-
-    let defaultVariant = "";
-    if (
-      "DefaultVariant" in this.theme.metadata &&
-      variants.includes(this.theme.metadata.DefaultVariant)
-    ) {
-      defaultVariant = this.theme.metadata.DefaultVariant.replace(/_/g, " ");
-    }
-
-    let defaultLabel = defaultVariant;
-    if (!defaultLabel && "DisplayNameForNoVariant" in this.theme.metadata) {
-      defaultLabel = this.theme.metadata.DisplayNameForNoVariant;
-    }
-
-    const menuitem = document.createXULElement("menuitem");
-    // If the name in the metadata is "Default", use the localized version.
-    if (!defaultLabel || defaultLabel.toLowerCase() == "default") {
-      document.l10n.setAttributes(menuitem, "chat-theme-preview-default");
-    } else {
-      menuitem.setAttribute("label", defaultLabel);
-    }
-    menuitem.setAttribute("value", "default");
-    popup.appendChild(menuitem);
-    popup.appendChild(document.createXULElement("menuseparator"));
-
-    variants.sort().forEach(function (aVariantName) {
-      const displayName = aVariantName.replace(/_/g, " ");
-      if (displayName != defaultVariant) {
-        const variantMenuitem = document.createXULElement("menuitem");
-        variantMenuitem.setAttribute("label", displayName);
-        variantMenuitem.setAttribute("value", aVariantName);
-        popup.appendChild(variantMenuitem);
-      }
-    });
-    this._ignoreVariantChange = true;
-    if (!this._loaded) {
-      menulist.value = this.theme.variant = menulist.value;
-    } else {
-      menulist.value = this.theme.variant; // (reset to "default")
-      Preferences.userChangedValue(menulist);
-    }
-    this._ignoreVariantChange = false;
-
-    // disable the variant menulist if there's no variant, or only one
-    // which is the default
-    menulist.disabled =
-      variants.length == 0 || (variants.length == 1 && defaultVariant);
-
-    this.reloadPreview();
-    document.getElementById("noPreviewScreen").hidden = true;
-  },
-
   reloadPreview() {
-    this.browser.init(this.conv);
-    this.browser._theme = this.theme;
-    Services.obs.addObserver(this, "conversation-loaded");
+    try {
+      this.browser.init(this.conv);
+      Services.obs.addObserver(this, "conversation-loaded");
+    } catch (e) {
+      // The conversation document failed to load. Show the fallback screen
+      // instead of the preview.
+      this.showNoPreview();
+    }
+  },
+
+  showNoPreview() {
+    const previewBoxBrowser = document
+      .getElementById("previewBox")
+      .querySelector("browser");
+    if (previewBoxBrowser) {
+      previewBoxBrowser.hidden = true;
+    }
+    document.getElementById("noPreviewScreen").hidden = false;
   },
 
   observe(aSubject, aTopic) {
@@ -241,7 +145,7 @@ var previewObserver = {
     // added message, as that causes the entire pref pane to jump up
     // (bug 1179943). Therefore, we override the method convbrowser
     // uses to determine if it should scroll, as well as its
-    // mirror in the contentWindow (that messagestyle JS can call).
+    // mirror in the contentWindow (that conversation JS can call).
     this.browser.convScrollEnabled = () => false;
     this.browser.contentWindow.convScrollEnabled = () => false;
 

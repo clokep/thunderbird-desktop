@@ -49,8 +49,8 @@ pref("messenger.options.filterMode", 2);
 
 // use "none" to disable
 pref("messenger.options.emoticonsTheme", "default");
-pref("messenger.options.messagesStyle.theme", "bubbles");
-pref("messenger.options.messagesStyle.variant", "default");
+pref("messenger.options.messagesStyle.bubbles", false);
+pref("messenger.options.messagesStyle.avatars", false);
 pref("messenger.options.messagesStyle.combineConsecutive", true);
 // if the time interval in seconds between two messages is longer than
 // this value, the messages will not be combined

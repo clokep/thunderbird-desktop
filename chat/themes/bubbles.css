@@ -1,0 +1,122 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+/* stylelint-disable stylelint-plugin-mozilla/use-design-tokens */
+
+:root {
+  color-scheme: light dark;
+}
+
+/* Density-aware spacing tokens (applied to :root of the chat conversation). */
+:root[uidensity="compact"] {
+  --space-step: 3px;
+  --space-base: var(--space-step);
+}
+
+:root[uidensity="touch"] {
+  --space-step: 3px;
+  --space-base: calc(var(--space-step) * 3);
+}
+
+:root[uidensity="relaxed"] {
+  --space-step: 3px;
+  --space-base: calc(var(--space-step) * 4);
+}
+
+/* Bubbles theme. */
+/* Gated on #Chat[data-bubbles="true"] set by conversation-browser.js. */
+
+#Chat[data-bubbles="true"] .message {
+  display: flex;
+  flex-direction: column;
+  margin-block: var(--space-step);
+}
+
+#Chat[data-bubbles="true"] .message:not(.event) .message-sidebar,
+#Chat[data-bubbles="true"] .message-footer {
+  display: none;
+}
+
+/*
+ * The default style shows the timestamp in the sidebar. The bubbles style has
+ * no sidebar, so the timestamp is shown next to the sender instead and is
+ * revealed while the message is hovered.
+ */
+#Chat[data-bubbles="true"] .message-sender-time {
+  font-size: 0.75em;
+  font-weight: normal;
+  color: light-dark(var(--color-text-secondary), var(--color-background-alt)); /* Improved contrast for dark mode */
+}
+
+#Chat[data-bubbles="true"] .message-sender-time::before {
+  content: " - ";
+}
+
+#Chat[data-bubbles="true"] .message:not(.event):hover .message-sender-time {
+  display: inline;
+}
+
+/* Bubbles are tinted with the sender color when available, and fall back
+   to a per-direction color otherwise. */
+#Chat[data-bubbles="true"] .message.incoming:not(.event) {
+  --bubble-color: var(--sender-color, light-dark(var(--color-red-50), #fca5a5));
+}
+
+#Chat[data-bubbles="true"] .message.outgoing:not(.event) {
+  --bubble-color: var(--sender-color, light-dark(var(--color-blue-50), #88ccfc));
+}
+
+#Chat[data-bubbles="true"] .message:not(.event) {
+  --bubble-color: var(--color-gray-50);
+  align-items: stretch;
+  background: color-mix(in srgb, var(--bubble-color) 12%, var(--layout-background-1));
+  border: 1px solid color-mix(in srgb, var(--bubble-color) 45%, var(--layout-background-1));
+  border-radius: var(--border-radius-medium, 12px);
+  padding: var(--space-base);
+}
+
+#Chat[data-bubbles="true"] .message.outgoing {
+  align-self: flex-end;
+}
+
+#Chat[data-bubbles="true"] .message.incoming {
+  align-self: flex-start;
+}
+
+/*
+ * Merge consecutive messages from the same sender into a single bubble by
+ * dropping the gap, the inner border edges and the inner corner radii.
+ */
+#Chat[data-bubbles="true"] .message.consecutive:not(.event) {
+  margin-block-start: 0;
+  border-block-start: none;
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+}
+
+#Chat[data-bubbles="true"] .message:not(.event):has(+ .message.consecutive) {
+  margin-block-end: 0;
+  border-block-end: none;
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+}
+
+/* Divider between the messages sharing a bubble. */
+#Chat[data-bubbles="true"] .message.consecutive:not(.event)::before {
+  content: "";
+  display: block;
+  border-block-start: 1px solid color-mix(in srgb, var(--bubble-color) 30%, var(--layout-background-1));
+  margin-block: calc(var(--space-base) * -0.5) var(--space-base);
+}
+
+#Chat[data-bubbles="true"] .message.event {
+  align-self: stretch;
+  background: var(--layout-background-1);
+  border-radius: var(--border-radius-medium, 12px);
+  padding: var(--space-step) var(--space-base);
+}
+
+#Chat[data-bubbles="true"] .message.context > .message-body > .message-sender {
+  opacity: 1;
+}

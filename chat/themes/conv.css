@@ -2,6 +2,42 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* stylelint-disable stylelint-plugin-mozilla/use-design-tokens */
+
+:root {
+  color-scheme: light dark;
+
+  /* Density-specific spacing for the child document. */
+}
+
+/* Density-aware spacing tokens (applied to :root of the chat conversation). */
+:root[uidensity="compact"] {
+  --space-step: 3px;
+  --space-base: var(--space-step);
+}
+
+:root[uidensity="touch"] {
+  --space-step: 3px;
+  --space-base: calc(var(--space-step) * 3);
+}
+
+:root[uidensity="relaxed"] {
+  --space-step: 3px;
+  --space-base: calc(var(--space-step) * 4);
+}
+
+#Chat {
+
+#Chat {
+  white-space: normal;
+  overflow: hidden !important;
+
+  & > * {
+    overflow: visible !important;
+    unicode-bidi: plaintext;
+  }
+}
+
 .ib-msg-txt {
   white-space: pre-wrap;
   word-wrap: break-word;
@@ -11,31 +47,220 @@
   text-decoration: underline;
 }
 
-/* disable overflow in themes until bug 42676 is fixed in Mozilla */
-#Chat {
-  overflow: hidden !important;
-
-  & * {
-    overflow: visible !important;
-    unicode-bidi: plaintext;
-  }
+.message {
+  display: flex;
+  align-items: flex-start;
+  margin-block: var(--space-base);
+  padding: var(--space-base);
 }
 
-#unread-ruler {
-  margin: 0;
-  inline-size: 100%;
-  border: none;
-  border-block-start: 1px dashed red;
+.message-sidebar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-inline-end: var(--space-base);
+  flex-shrink: 0;
+  /* Grow with the timestamp so it is never clipped (e.g. at a large font size). */
+  min-inline-size: calc(var(--space-base) * 8);
+}
+
+.message-avatar {
+  display: none;
+  inline-size: var(--space-base);
+  block-size: var(--space-base);
+  border-radius: 50%;
+  object-fit: cover;
+  margin-block-end: var(--space-step);
+}
+
+#Chat[data-avatars="true"] .message-avatar {
+  display: block;
+}
+
+.message-time {
+  font-size: 0.75em;
+  color: light-dark(var(--color-text-secondary), var(--color-background-alt)); /* Base color for time */
+}
+
+.message-body {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.message-sender {
+  font-weight: bold;
+}
+
+/*
+ * The sender color is exposed by the message as --sender-color in group chats.
+ * One-on-one conversations have no per-sender color, so fall back to a color
+ * per direction, as the previous default theme did.
+ */
+.message.incoming .message-sender {
+  color: var(--sender-color, var(--color-red-50));
+}
+
+.message.outgoing .message-sender {
+  color: var(--sender-color, var(--color-blue-50));
+}
+
+/* The bubbles style shows this next to the sender; the default style does not. */
+.message-sender-time {
+  display: none;
+}
+
+.message-content {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.message-footer {
+  display: none;
+}
+
+#Chat > .message.event {
+  align-items: center;
+  color: light-dark(var(--color-text-secondary), var(--color-background-alt)); /* Base color for time */
+  font-size: 0.9em;
+  flex-direction: column;
+  gap: var(--space-step);
+  padding-block: var(--space-step);
+}
+
+.event-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-step);
+  max-inline-size: 100%;
+}
+
+.event-row .message-sidebar {
+  min-inline-size: 0;
+}
+
+.event-row .message-body {
+  flex: initial;
+  min-inline-size: 0;
+}
+
+.message.consecutive:not(.event) > .message-sidebar {
+  display: none;
+}
+
+.message.consecutive:not(.event) > .message-body > .message-sender {
+  display: none;
+}
+
+.message.context > .message-body > .message-sender {
+  opacity: 0.7;
 }
 
 .ib-nick {
   font-weight: bold;
-
-  &[left] {
-    color: grey;
-  }
 }
 
 .monospaced {
   font-family: monospace;
+}
+
+/* State classes (reserved for future message flags). */
+
+.action {
+  font-style: italic;
+}
+
+.error {
+  color: var(--color-text-critical);
+}
+
+.pending {
+  opacity: 0.6;
+}
+
+.deleted {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.edited::after {
+  content: " (edited)";
+  font-style: italic;
+  opacity: 0.6;
+  font-size: 0.9em;
+}
+
+.nick,
+.mention {
+  font-weight: bold;
+}
+
+.nick > .message-sender {
+  text-decoration: underline;
+}
+
+/* Encrypted sender lock icon. */
+
+.message-encrypted::before {
+  content: "";
+  display: inline-block;
+  inline-size: 11px;
+  block-size: 11px;
+  opacity: 0.5;
+  background: url("chrome://messenger/skin/icons/connection-secure.svg") no-repeat center;
+  background-size: contain;
+  margin-inline-end: 4px;
+  -moz-context-properties: fill;
+}
+
+/* Rulers */
+
+#unread-ruler {
+  margin: var(--space-base) 0;
+  inline-size: 100%;
+  border: none;
+  border-block-start: 1px dashed var(--color-primary-default);
+}
+
+.sessionstart-ruler {
+  margin: calc(var(--space-base) * 2) 0 calc(var(--space-base) * 3);
+  inline-size: 100%;
+  border: none;
+  border-block-start: 1px solid var(--layout-border-1);
+}
+
+/* Event-collapse toggle (rendered by conversation-behavior.js). */
+
+.event-toggle {
+  background: var(--icon-nav-down-sm) no-repeat left center;
+  cursor: pointer;
+  block-size: 22px;
+  inline-size: 20px;
+  opacity: 0.5;
+  -moz-context-properties: stroke;
+}
+
+.event-toggle:hover {
+  opacity: 1;
+}
+
+.hide-children > .event-toggle {
+  background-image: var(--icon-nav-right-sm);
+}
+
+.hide-children > .event-toggle:-moz-locale-dir(rtl) {
+  background-image: var(--icon-nav-left-sm);
+}
+
+.hide-children > .event-collapsed {
+  display: none;
+}
+
+/* Time interval markers (rendered by conversation-behavior.js). */
+
+.message-interval {
+  text-align: center;
+  font-size: 0.8em;
+  color: light-dark(var(--color-text-secondary), var(--color-background-alt)); /* Base color for time */
+  margin-block: var(--space-base);
 }

@@ -204,7 +204,7 @@ async function showTooltip(elementSelector, tooltip, browser) {
 
 async function hideTooltip(tooltip, browser) {
   await BrowserTestUtils.synthesizeMouseAtCenter(
-    ".message .body",
+    ".message .message-body",
     { type: "mousemove" },
     browser
   );

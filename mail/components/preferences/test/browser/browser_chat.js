@@ -81,7 +81,7 @@ add_task(async function test_sounds() {
   });
   MockSound.init();
 
-  const { prefsDocument, prefsWindow } = await openNewPrefsTab(
+  const { prefsDocument } = await openNewPrefsTab(
     "paneChat",
     "desktopChatNotifications"
   );
@@ -94,7 +94,7 @@ add_task(async function test_sounds() {
   );
   Assert.ok(systemRadio.selected);
   Assert.ok(!playSoundButton.disabled);
-  EventUtils.synthesizeMouseAtCenter(playSoundButton, {}, prefsWindow);
+  playSoundButton.click();
   Assert.deepEqual(
     MockSound.played,
     [`(event)${Ci.nsISound.EVENT_NEW_MAIL_RECEIVED}`],
@@ -102,7 +102,7 @@ add_task(async function test_sounds() {
   );
   MockSound.reset();
 
-  EventUtils.synthesizeMouseAtCenter(customRadio, {}, prefsWindow);
+  customRadio.click();
   Assert.ok(playSoundButton.disabled);
   Assert.equal(soundUrlTextbox.value, "");
 
@@ -111,7 +111,7 @@ add_task(async function test_sounds() {
   MockFilePicker.init(window);
   MockFilePicker.setFiles([soundFile]);
   MockFilePicker.returnValue = MockFilePicker.returnOK;
-  EventUtils.synthesizeMouseAtCenter(browseButton, {}, prefsWindow);
+  browseButton.click();
   await TestUtils.waitForCondition(
     () => soundUrlTextbox.value,
     "waiting for sound url to be set"
@@ -120,7 +120,7 @@ add_task(async function test_sounds() {
 
   Assert.equal(Services.prefs.getIntPref("mail.chat.play_sound.type"), 1);
   const audioPromise = TestUtils.topicObserved("notification-audio-ended");
-  EventUtils.synthesizeMouseAtCenter(playSoundButton, {}, prefsWindow);
+  playSoundButton.click();
   const [audioElement] = await audioPromise;
   Assert.equal(MockSound.played.length, 0);
   Assert.equal(audioElement.src, soundUrl);
@@ -168,12 +168,62 @@ add_task(async function testMessageStylePreview() {
     "chrome://messenger/skin/layout.css",
     "chrome://messenger/skin/spacings.css",
     "chrome://chat/skin/conv.css",
+    "chrome://chat/skin/bubbles.css",
   ]) {
     Assert.ok(
       previewDoc.querySelector(`link[href="${stylesheet}"]`),
       `${stylesheet} is linked in the preview document`
     );
   }
+
+  Assert.equal(
+    messageParent.dataset.bubbles,
+    "false",
+    "bubbles off in the preview"
+  );
+  Assert.equal(
+    messageParent.dataset.avatars,
+    "false",
+    "avatars off in the preview"
+  );
+
+  // One-on-one conversations have no per-sender color, so the default style
+  // must still color the sender line by direction.
+  const previewWindow = previewDoc.defaultView;
+  const senderColor = direction =>
+    previewWindow.getComputedStyle(
+      messageParent.querySelector(`.message.${direction} .message-sender`)
+    ).color;
+  for (const el of messageParent.querySelectorAll(".message:not(.event)")) {
+    Assert.notEqual(
+      previewWindow.getComputedStyle(el.querySelector(".message-sender")).color,
+      previewWindow.getComputedStyle(el.querySelector(".message-content"))
+        .color,
+      "the sender line is colored in the default style"
+    );
+  }
+  Assert.notEqual(
+    senderColor("incoming"),
+    senderColor("outgoing"),
+    "incoming and outgoing senders use different colors"
+  );
+
+  // Display option changes flow through the conversation browser pref
+  // observers into the preview document.
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["messenger.options.messagesStyle.bubbles", true],
+      ["messenger.options.messagesStyle.avatars", true],
+    ],
+  });
+  await TestUtils.waitForCondition(
+    () => messageParent.dataset.bubbles === "true",
+    "preview should enable bubbles"
+  );
+  await TestUtils.waitForCondition(
+    () => messageParent.dataset.avatars === "true",
+    "preview should enable avatars"
+  );
 
   await SpecialPowers.pushPrefEnv({
     set: [["mail.uidensity", UIDensity.MODE_TOUCH]],

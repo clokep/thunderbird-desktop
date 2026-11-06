@@ -26,10 +26,11 @@ export var MailMigrator = {
    * Determine if the UI has been upgraded in a way that requires us to reset
    * some user configuration.  If so, performs the resets.
    */
+  /* eslint-disable complexity -- Pre-existing: this method chains many version checks */
   _migrateUI() {
     // The code for this was ported from
     // mozilla/browser/components/nsBrowserGlue.js
-    const UI_VERSION = 66;
+    const UI_VERSION = 67;
     const UI_VERSION_PREF = "mail.ui-rdf.version";
     let currentUIVersion = Services.prefs.getIntPref(UI_VERSION_PREF, 0);
 
@@ -527,6 +528,10 @@ export var MailMigrator = {
         this._migrateSearchDialog();
       }
 
+      if (currentUIVersion < 67) {
+        this._migrateChatMessageStyle();
+      }
+
       // Migration tasks that may take a long time are not run immediately, but
       // added to the MigrationTasks object then run at the end.
       //
@@ -753,6 +758,34 @@ export var MailMigrator = {
       // Change outgoing server to OAuth2.
       server.authMethod = Ci.nsMsgAuthMethod.OAuth2;
     }
+  },
+
+  /**
+   * Migrate from the old per-theme chat message style to the new bubbles
+   * toggle. The default was "bubbles" so profiles that never customized the
+   * theme get bubbles enabled.
+   */
+  _migrateChatMessageStyle() {
+    if (
+      Services.prefs.prefHasUserValue("messenger.options.messagesStyle.theme")
+    ) {
+      if (
+        Services.prefs.getCharPref("messenger.options.messagesStyle.theme") ==
+        "bubbles"
+      ) {
+        Services.prefs.setBoolPref(
+          "messenger.options.messagesStyle.bubbles",
+          true
+        );
+      }
+    } else {
+      Services.prefs.setBoolPref(
+        "messenger.options.messagesStyle.bubbles",
+        true
+      );
+    }
+    Services.prefs.clearUserPref("messenger.options.messagesStyle.theme");
+    Services.prefs.clearUserPref("messenger.options.messagesStyle.variant");
   },
 
   /**

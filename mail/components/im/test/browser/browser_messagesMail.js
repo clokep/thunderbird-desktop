@@ -29,7 +29,8 @@ add_task(async function testCollapse() {
   await addNotice(conversation, chatConv);
 
   is(
-    messageParent.querySelector(".event-row:nth-child(1) .body").textContent,
+    messageParent.querySelector(".event-row:nth-child(1) .message-content")
+      .textContent,
     "test notice",
     "notice added to conv"
   );
@@ -52,7 +53,7 @@ add_task(async function testCollapse() {
   ]);
 
   const hiddenGroup = messageParent.querySelector(".hide-children");
-  const toggle = hiddenGroup.querySelector(".eventToggle");
+  const toggle = hiddenGroup.querySelector(".event-toggle");
   ok(toggle);
   Assert.greaterOrEqual(hiddenGroup.querySelectorAll(".event-row").length, 5);
 
@@ -226,10 +227,278 @@ add_task(async function testSystemMessageReplacement() {
   );
   is(firstMessage.dataset.remoteId, "foo");
   is(
-    firstMessage.querySelector(".body").textContent,
+    firstMessage.querySelector(".message-content").textContent,
     "better system message",
     "Message content was updated"
   );
+
+  conversation.close();
+  account.disconnect();
+  const loginUpdate = TestUtils.topicObserved("passwordmgr-storage-changed");
+  IMServices.accounts.deleteAccount(account.id);
+  await loginUpdate; // Ensure login removal.
+});
+
+add_task(async function testRenameCollapse() {
+  const account = IMServices.accounts.createAccount(
+    "testuser",
+    "prpl-mochitest"
+  );
+  const passwordPromise = TestUtils.topicObserved("account-updated");
+  account.password = "this is a test";
+  await passwordPromise;
+  account.connect();
+
+  await openChatTab();
+  ok(BrowserTestUtils.isVisible(document.getElementById("chatPanel")));
+
+  const conversation = account.prplAccount.wrappedJSObject.makeMUC("renames");
+  const convNode = getConversationItem(conversation);
+  ok(convNode);
+
+  await EventUtils.synthesizeMouseAtCenter(convNode, {});
+
+  const chatConv = getChatConversationElement(conversation);
+  ok(chatConv, "found conversation");
+  ok(BrowserTestUtils.isVisible(chatConv), "conversation visible");
+  const messageParent = await getChatMessageParent(chatConv);
+
+  conversation.addParticipant("user0");
+  for (let i = 0; i < 20; i++) {
+    conversation.updateNick(`user${i}`, `user${i + 1}`, false);
+    // Live protocol events arrive one at a time: wait for this event to be
+    // rendered and processed before adding the next one.
+    await BrowserTestUtils.waitForMutationCondition(
+      messageParent,
+      { childList: true, subtree: true },
+      () => messageParent.querySelectorAll(".event-row").length == i + 1
+    );
+  }
+
+  const hiddenGroup = messageParent.querySelector(".hide-children");
+  ok(hiddenGroup, "consecutive rename events collapse");
+  ok(
+    hiddenGroup?.querySelector(".event-toggle"),
+    "collapsed group has a toggle"
+  );
+  Assert.greaterOrEqual(
+    hiddenGroup?.querySelectorAll(".event-row").length ?? 0,
+    20,
+    "group holds all the rename events"
+  );
+  is(
+    hiddenGroup.querySelectorAll(".event-collapsed").length,
+    18,
+    "middle rename events are hidden, only first and last visible"
+  );
+
+  conversation.close();
+  account.disconnect();
+  const loginUpdate = TestUtils.topicObserved("passwordmgr-storage-changed");
+  IMServices.accounts.deleteAccount(account.id);
+  await loginUpdate; // Ensure login removal.
+});
+
+add_task(async function testReopenHistory() {
+  const account = IMServices.accounts.createAccount(
+    "testuser",
+    "prpl-mochitest"
+  );
+  const passwordPromise = TestUtils.topicObserved("account-updated");
+  account.password = "this is a test";
+  await passwordPromise;
+  account.connect();
+
+  await openChatTab();
+  ok(BrowserTestUtils.isVisible(document.getElementById("chatPanel")));
+
+  const conversation = account.prplAccount.wrappedJSObject.makeMUC("history");
+  const convNode = getConversationItem(conversation);
+  ok(convNode);
+
+  await EventUtils.synthesizeMouseAtCenter(convNode, {});
+
+  const chatConv = getChatConversationElement(conversation);
+  ok(chatConv, "found conversation");
+  ok(BrowserTestUtils.isVisible(chatConv), "conversation visible");
+  const messageParent = await getChatMessageParent(chatConv);
+
+  conversation.addParticipant("user0");
+  conversation.addParticipant("alice");
+  conversation.writeMessage("alice", "before the renames", {
+    incoming: true,
+  });
+  for (let i = 0; i < 30; i++) {
+    // A busy channel: a run of consecutive rename events.
+    conversation.updateNick(`user${i}`, `user${i + 1}`, false);
+  }
+  for (let i = 0; i < 20; i++) {
+    conversation.writeMessage("alice", `after the renames ${i}`, {
+      incoming: true,
+    });
+  }
+  do {
+    await BrowserTestUtils.waitForEvent(
+      chatConv.convBrowser,
+      "MessagesDisplayed"
+    );
+  } while (chatConv.convBrowser.getPendingMessagesCount() > 0);
+
+  is(
+    messageParent.querySelectorAll(".message.incoming").length,
+    21,
+    "normal messages displayed before reopening"
+  );
+  Assert.greaterOrEqual(
+    messageParent.querySelectorAll(".event-row").length,
+    30,
+    "rename events displayed before reopening"
+  );
+
+  // Close and reopen the chat tab: the in-memory history is replayed.
+  await closeChatTab();
+  await openChatTab();
+
+  const reopenedNode = getConversationItem(conversation);
+  ok(reopenedNode, "conversation still listed after tab close");
+  await EventUtils.synthesizeMouseAtCenter(reopenedNode, {});
+
+  const reopenedChat = getChatConversationElement(conversation);
+  ok(reopenedChat, "reopened conversation");
+  const reopenedParent = reopenedChat.convBrowser.contentChatNode;
+  await TestUtils.waitForCondition(
+    () => reopenedParent.querySelectorAll(".message.incoming").length == 21,
+    "normal messages displayed after reopening",
+    50_000
+  );
+  const hiddenGroup = reopenedParent.querySelector(".hide-children");
+  ok(hiddenGroup, "consecutive rename events collapse after reopening");
+  Assert.greaterOrEqual(
+    hiddenGroup?.querySelectorAll(".event-row").length ?? 0,
+    30,
+    "group holds all the rename events after reopening"
+  );
+
+  conversation.close();
+  account.disconnect();
+  const loginUpdate = TestUtils.topicObserved("passwordmgr-storage-changed");
+  IMServices.accounts.deleteAccount(account.id);
+  await loginUpdate; // Ensure login removal.
+});
+
+add_task(async function test_timeNotClipped() {
+  const account = IMServices.accounts.createAccount(
+    "testuser",
+    "prpl-mochitest"
+  );
+  const passwordPromise = TestUtils.topicObserved("account-updated");
+  account.password = "this is a test";
+  await passwordPromise;
+  account.connect();
+
+  await openChatTab();
+  Assert.ok(BrowserTestUtils.isVisible(document.getElementById("chatPanel")));
+
+  const conversation = account.prplAccount.wrappedJSObject.makeDM("clipping");
+  const convNode = getConversationItem(conversation);
+  Assert.ok(convNode, "conversation is in the contacts list");
+
+  await EventUtils.synthesizeMouseAtCenter(convNode, {});
+
+  const chatConv = getChatConversationElement(conversation);
+  Assert.ok(chatConv, "found conversation");
+  Assert.ok(BrowserTestUtils.isVisible(chatConv), "conversation visible");
+  const messageParent = await getChatMessageParent(chatConv);
+
+  conversation.addMessages([
+    {
+      who: "clipping",
+      content: "hello",
+      options: {
+        incoming: true,
+        time: new Date(2020, 0, 1, 13, 49).getTime() / 1000,
+      },
+    },
+  ]);
+  do {
+    await BrowserTestUtils.waitForEvent(
+      chatConv.convBrowser,
+      "MessagesDisplayed"
+    );
+  } while (chatConv.convBrowser.getPendingMessagesCount() > 0);
+
+  const message = messageParent.querySelector(".message.incoming");
+  const sidebar = message.querySelector(".message-sidebar");
+  const time = message.querySelector(".message-time");
+  Assert.equal(time.textContent, "13:49", "the timestamp shows both digits");
+  Assert.ok(
+    BrowserTestUtils.isHidden(message.querySelector(".message-sender-time")),
+    "the sender line has no timestamp in the default style"
+  );
+
+  // A larger message font must not push the timestamp outside of the sidebar,
+  // where the overflowing text would be clipped by the #Chat overflow guard.
+  chatConv.convBrowser.contentDocument.documentElement.style.fontSize = "50px";
+  const { left: timeLeft } = time.getBoundingClientRect();
+  const { left: sidebarLeft } = sidebar.getBoundingClientRect();
+  Assert.greaterOrEqual(
+    timeLeft,
+    sidebarLeft - 1,
+    "the timestamp stays inside its sidebar"
+  );
+
+  conversation.close();
+  account.disconnect();
+  const loginUpdate = TestUtils.topicObserved("passwordmgr-storage-changed");
+  IMServices.accounts.deleteAccount(account.id);
+  await loginUpdate; // Ensure login removal.
+});
+
+add_task(async function test_senderColors() {
+  const account = IMServices.accounts.createAccount(
+    "testuser",
+    "prpl-mochitest"
+  );
+  const passwordPromise = TestUtils.topicObserved("account-updated");
+  account.password = "this is a test";
+  await passwordPromise;
+  account.connect();
+
+  await openChatTab();
+
+  const conversation = account.prplAccount.wrappedJSObject.makeDM("colors");
+  const convNode = getConversationItem(conversation);
+  await EventUtils.synthesizeMouseAtCenter(convNode, {});
+
+  const chatConv = getChatConversationElement(conversation);
+  const messageParent = await getChatMessageParent(chatConv);
+
+  conversation.addMessages([
+    { who: "colors", content: "in", options: { incoming: true } },
+    { who: "me", content: "out", options: { outgoing: true } },
+  ]);
+  do {
+    await BrowserTestUtils.waitForEvent(
+      chatConv.convBrowser,
+      "MessagesDisplayed"
+    );
+  } while (chatConv.convBrowser.getPendingMessagesCount() > 0);
+
+  const doc = chatConv.convBrowser.contentWindow;
+  for (const direction of ["incoming", "outgoing"]) {
+    const message = messageParent.querySelector(`.message.${direction}`);
+    const sender = doc.getComputedStyle(
+      message.querySelector(".message-sender")
+    ).color;
+    const body = doc.getComputedStyle(
+      message.querySelector(".message-content")
+    ).color;
+    Assert.notEqual(
+      sender,
+      body,
+      `the ${direction} sender is colored in the default style`
+    );
+  }
 
   conversation.close();
   account.disconnect();

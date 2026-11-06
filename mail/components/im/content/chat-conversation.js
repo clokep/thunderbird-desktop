@@ -322,15 +322,6 @@
       };
       Services.prefs.addObserver("mail.spellcheck.inline", this.prefObserver);
 
-      Services.prefs.addObserver(
-        "messenger.options.messagesStyle.theme",
-        this.#reloadConversation
-      );
-      Services.prefs.addObserver(
-        "messenger.options.messagesStyle.variant",
-        this.#reloadConversation
-      );
-
       this.initializeAttributeInheritance();
     }
 
@@ -353,14 +344,6 @@
         "mail.spellcheck.inline",
         this.prefObserver
       );
-      Services.prefs.removeObserver(
-        "messenger.options.messagesStyle.theme",
-        this.#reloadConversation
-      );
-      Services.prefs.removeObserver(
-        "messenger.options.messagesStyle.variant",
-        this.#reloadConversation
-      );
     }
 
     _forgetConv() {
@@ -373,21 +356,6 @@
     close() {
       this._forgetConv(true);
     }
-
-    /**
-     * Reload the conversation browser so that a changed message style applies
-     * to the messages that are already displayed.
-     *
-     * @implements {nsIObserver}
-     */
-    #reloadConversation = () => {
-      if (!this.loaded || !this._conv) {
-        return;
-      }
-      this.loaded = false;
-      Services.obs.addObserver(this.observer, "conversation-loaded");
-      this.convBrowser.init(this._conv);
-    };
 
     _showFirstMessages() {
       if (!this._conv) {

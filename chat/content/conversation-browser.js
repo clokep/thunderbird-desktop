@@ -10,8 +10,8 @@
 {
   const LazyModules = {};
   ChromeUtils.defineESModuleGetters(LazyModules, {
+    applyDisplayOptions: "resource:///modules/imThemes.sys.mjs",
     cleanupImMarkup: "resource:///modules/imContentSink.sys.mjs",
-    getCurrentTheme: "resource:///modules/imThemes.sys.mjs",
     getDocumentFragmentFromHTML: "resource:///modules/imThemes.sys.mjs",
     getHTMLForMessage: "resource:///modules/imThemes.sys.mjs",
     IMServices: "resource:///modules/IMServices.sys.mjs",
@@ -127,14 +127,16 @@
 
       super.connectedCallback();
 
-      this._theme = null;
-
       this.autoCopyEnabled = false;
 
       this.magicCopyPref =
         "messenger.conversations.selections.magicCopyEnabled";
+      this.bubblesPref = "messenger.options.messagesStyle.bubbles";
+      this.avatarsPref = "messenger.options.messagesStyle.avatars";
 
       this.magicCopyInitialized = false;
+
+      this.displayOptionsInitialized = false;
 
       this._destroyed = false;
 
@@ -165,11 +167,15 @@
       window.addEventListener("uidensitychange", this);
 
       // @implements {nsIObserver}
-      this.prefObserver = () => {
-        if (this.magicCopyEnabled) {
-          this.enableMagicCopy();
-        } else {
-          this.disableMagicCopy();
+      this.prefObserver = (subject, topic, data) => {
+        if (data == this.magicCopyPref) {
+          if (this.magicCopyEnabled) {
+            this.enableMagicCopy();
+          } else {
+            this.disableMagicCopy();
+          }
+        } else if (data == this.bubblesPref || data == this.avatarsPref) {
+          this.onDisplayOptionsChange();
         }
       };
 
@@ -227,12 +233,9 @@
       // Magic Copy may be initialized if the convbrowser is already
       // displaying a conversation.
       this.uninitMagicCopy();
+      this.uninitDisplayOptions();
 
       this._conv = conversation;
-
-      // init is called when the message style preview is
-      // reloaded so we need to reset _theme.
-      this._theme = null;
 
       // Prevent ongoing asynchronous message display from continuing.
       this._messageDisplayPending = false;
@@ -242,14 +245,15 @@
         () => {
           LazyModules.initHTMLDocument(
             this._conv,
-            this.theme,
-            this.contentDocument
+            this.contentDocument,
+            this._messageStyleOptions
           );
 
           this.onUIDensityChange();
 
           this._exposeMethodsToContent();
           this.initMagicCopy();
+          this.initDisplayOptions();
 
           // We need to reset these variables here to avoid a race
           // condition if we are starting to display a new conversation
@@ -290,8 +294,11 @@
       });
     }
 
-    get theme() {
-      return this._theme || (this._theme = LazyModules.getCurrentTheme());
+    get _messageStyleOptions() {
+      return {
+        bubbles: Services.prefs.getBoolPref(this.bubblesPref),
+        avatars: Services.prefs.getBoolPref(this.avatarsPref),
+      };
     }
 
     get contentDocument() {
@@ -352,6 +359,33 @@
       this.magicCopyInitialized = false;
     }
 
+    initDisplayOptions() {
+      if (this.displayOptionsInitialized) {
+        return;
+      }
+      Services.prefs.addObserver(this.bubblesPref, this.prefObserver);
+      Services.prefs.addObserver(this.avatarsPref, this.prefObserver);
+      this.displayOptionsInitialized = true;
+    }
+
+    uninitDisplayOptions() {
+      if (!this.displayOptionsInitialized) {
+        return;
+      }
+      Services.prefs.removeObserver(this.bubblesPref, this.prefObserver);
+      Services.prefs.removeObserver(this.avatarsPref, this.prefObserver);
+      this.displayOptionsInitialized = false;
+    }
+
+    onDisplayOptionsChange() {
+      if (this.contentDocument) {
+        LazyModules.applyDisplayOptions(
+          this.contentDocument,
+          this._messageStyleOptions
+        );
+      }
+    }
+
     destroy() {
       super.destroy();
       if (this._destroyed) {
@@ -361,6 +395,7 @@
       this._messageDisplayPending = false;
 
       this.uninitMagicCopy();
+      this.uninitDisplayOptions();
 
       window.removeEventListener("uidensitychange", this);
 
@@ -470,12 +505,9 @@
       if (this.browsingContext.isActive) {
         msg.message = this.prepareMessageContent(msg);
         const isNext = LazyModules.wasNextMessage(msg, this.contentDocument);
-        const htmlMessage = LazyModules.getHTMLForMessage(
-          msg,
-          this.theme,
+        const htmlMessage = LazyModules.getHTMLForMessage(msg, {
           isNext,
-          false
-        );
+        });
         const ruler = this.contentDocument.getElementById("unread-ruler");
         if (ruler?._originalMsg?.remoteId === msg.remoteId) {
           ruler._originalMsg = msg;
@@ -632,17 +664,15 @@
 
       let next =
         (aContext == this._lastMessageIsContext || aMsg.system) &&
-        LazyModules.isNextMessage(this.theme, aMsg, this._lastMessage);
+        LazyModules.isNextMessage(aMsg, this._lastMessage);
       let newElt;
       if (next && aFirstUnread) {
         // If there wasn't an unread ruler, this would be a Next message.
         // Therefore, save that version for later.
-        let html = LazyModules.getHTMLForMessage(
-          aMsg,
-          this.theme,
-          next,
-          aContext
-        );
+        let html = LazyModules.getHTMLForMessage(aMsg, {
+          isNext: next,
+          isContext: aContext,
+        });
         const ruler = doc.getElementById("unread-ruler");
         ruler.nextMsgHtml = html;
         ruler._originalMsg = aMsg;
@@ -656,7 +686,10 @@
         insert.id = "insert-before";
 
         next = false;
-        html = LazyModules.getHTMLForMessage(aMsg, this.theme, next, aContext);
+        html = LazyModules.getHTMLForMessage(aMsg, {
+          isNext: next,
+          isContext: aContext,
+        });
         newElt = LazyModules.insertHTMLForMessage(aMsg, html, doc, next);
         let marker = doc.createElement("div");
         marker.id = "end-of-split-block";
@@ -674,12 +707,10 @@
           insert.parentNode.insertBefore(marker, insert.nextElementSibling);
         }
       } else {
-        const html = LazyModules.getHTMLForMessage(
-          aMsg,
-          this.theme,
-          next,
-          aContext
-        );
+        const html = LazyModules.getHTMLForMessage(aMsg, {
+          isNext: next,
+          isContext: aContext,
+        });
         newElt = LazyModules.insertHTMLForMessage(aMsg, html, doc, next);
       }
 

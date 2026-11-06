@@ -13,20 +13,7 @@ ChromeUtils.defineLazyGetter(
   () => new Localization(["chat/conversations.ftl"], true)
 );
 
-var kMessagesStylePrefBranch = "messenger.options.messagesStyle.";
-var kThemePref = "theme";
-var kVariantPref = "variant";
-var kCombineConsecutivePref = "combineConsecutive";
-var kCombineConsecutiveIntervalPref = "combineConsecutiveInterval";
-
-var DEFAULT_THEME = "bubbles";
-var DEFAULT_THEMES = ["bubbles", "dark", "mail", "papersheets", "simple"];
-
 var kLineBreak = "@mozilla.org/windows-registry-key;1" in Cc ? "\r\n" : "\n";
-
-ChromeUtils.defineLazyGetter(lazy, "gPrefBranch", () =>
-  Services.prefs.getBranch(kMessagesStylePrefBranch)
-);
 
 ChromeUtils.defineLazyGetter(lazy, "TXTToHTML", function () {
   const cs = Cc["@mozilla.org/txttohtmlconv;1"].getService(
@@ -48,515 +35,117 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ToLocaleFormat: "resource:///modules/ToLocaleFormat.sys.mjs",
 });
 
-var gCurrentTheme = null;
-
-function getChromeFile(aURI) {
-  try {
-    // Most message style files are optional and fall back to other templates.
-    // Use TYPE_FETCH so probing for them does not report expected missing URLs.
-    const channel = Services.io.newChannel(
-      aURI,
-      null,
-      null,
-      null,
-      Services.scriptSecurityManager.getSystemPrincipal(),
-      null,
-      Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_SEC_CONTEXT_IS_NULL,
-      Ci.nsIContentPolicy.TYPE_FETCH
-    );
-    const stream = channel.open();
-    const sstream = Cc["@mozilla.org/scriptableinputstream;1"].createInstance(
-      Ci.nsIScriptableInputStream
-    );
-    sstream.init(stream);
-    const text = sstream.read(sstream.available());
-    sstream.close();
-    return text;
-  } catch (e) {
-    if (e.result != Cr.NS_ERROR_FILE_NOT_FOUND) {
-      dump("Getting " + aURI + ": " + e + "\n");
-    }
-    return null;
+/**
+ * Format the time of a message.
+ *
+ * @param {imIMessage} aMsg
+ * @param {string} [aFormat] - A format string for ToLocaleFormat, e.g. "%H:%M".
+ * @returns {string} The formatted time.
+ */
+function formatTime(aMsg, aFormat) {
+  const date = new Date(aMsg.time * 1000);
+  if (aFormat) {
+    return lazy.ToLocaleFormat(aFormat, date);
   }
+  return lazy.gTimeFormatter.format(date);
 }
 
-function HTMLTheme(aBaseURI) {
-  const files = {
-    footer: "Footer.html",
-    header: "Header.html",
-    status: "Status.html",
-    statusNext: "NextStatus.html",
-    incomingContent: "Incoming/Content.html",
-    incomingContext: "Incoming/Context.html",
-    incomingNextContent: "Incoming/NextContent.html",
-    incomingNextContext: "Incoming/NextContext.html",
-    outgoingContent: "Outgoing/Content.html",
-    outgoingContext: "Outgoing/Context.html",
-    outgoingNextContent: "Outgoing/NextContent.html",
-    outgoingNextContext: "Outgoing/NextContext.html",
-  };
+function getMessageClasses(aMsg, isNext, isContext) {
+  const msgClass = [];
 
-  for (const id in files) {
-    const html = getChromeFile(aBaseURI + files[id]);
-    if (html) {
-      Object.defineProperty(this, id, { value: html });
-    }
-  }
-
-  if (!Object.hasOwn(this, "incomingContent")) {
-    throw new Error("Invalid theme: Incoming/Content.html is missing!");
-  }
-}
-
-HTMLTheme.prototype = {
-  get footer() {
-    return "";
-  },
-  get header() {
-    return "";
-  },
-  get status() {
-    return this.incomingContent;
-  },
-  get statusNext() {
-    return this.status;
-  },
-  get incomingContent() {
-    throw new Error("Incoming/Content.html is a required file");
-  },
-  get incomingNextContent() {
-    return this.incomingContent;
-  },
-  get outgoingContent() {
-    return this.incomingContent;
-  },
-  get outgoingNextContent() {
-    return this.incomingNextContent;
-  },
-  get incomingContext() {
-    return this.incomingContent;
-  },
-  get incomingNextContext() {
-    return this.incomingNextContent;
-  },
-  get outgoingContext() {
-    return this.hasOwnProperty("outgoingContent")
-      ? this.outgoingContent
-      : this.incomingContext;
-  },
-  get outgoingNextContext() {
-    return this.hasOwnProperty("outgoingNextContent")
-      ? this.outgoingNextContent
-      : this.incomingNextContext;
-  },
-};
-
-function plistToJSON(aElt) {
-  switch (aElt.localName) {
-    case "true":
-      return true;
-    case "false":
-      return false;
-    case "string":
-    case "data":
-      return aElt.textContent;
-    case "real":
-      return parseFloat(aElt.textContent);
-    case "integer":
-      return parseInt(aElt.textContent, 10);
-    case "dict": {
-      const res = {};
-      const nodes = aElt.children;
-      for (let i = 0; i < nodes.length; ++i) {
-        if (nodes[i].nodeName == "key") {
-          const key = nodes[i].textContent;
-          ++i;
-          while (!Element.isInstance(nodes[i])) {
-            ++i;
-          }
-          res[key] = plistToJSON(nodes[i]);
-        }
-      }
-      return res;
-    }
-    case "array": {
-      const array = [];
-      const nodes = aElt.children;
-      for (let i = 0; i < nodes.length; ++i) {
-        if (Element.isInstance(nodes[i])) {
-          array.push(plistToJSON(nodes[i]));
-        }
-      }
-      return array;
-    }
-    default:
-      throw new Error("Unknown tag in plist file");
-  }
-}
-
-function getInfoPlistContent(aBaseURI) {
-  try {
-    const channel = Services.io.newChannel(
-      aBaseURI + "Info.plist",
-      null,
-      null,
-      null,
-      Services.scriptSecurityManager.getSystemPrincipal(),
-      null,
-      Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_SEC_CONTEXT_IS_NULL,
-      Ci.nsIContentPolicy.TYPE_OTHER
-    );
-    const stream = channel.open();
-    const parser = new DOMParser();
-    const doc = parser.parseFromStream(
-      stream,
-      null,
-      stream.available(),
-      "text/xml"
-    );
-    if (doc.documentElement.localName != "plist") {
-      throw new Error("Invalid Info.plist file");
-    }
-    let node = doc.documentElement.firstElementChild;
-    while (node && !Element.isInstance(node)) {
-      node = node.nextElementSibling;
-    }
-    if (!node || node.localName != "dict") {
-      throw new Error("Empty or invalid Info.plist file");
-    }
-    return plistToJSON(node);
-  } catch (e) {
-    console.error(e);
-    return null;
-  }
-}
-
-function getChromeBaseURI(aThemeName) {
-  if (DEFAULT_THEMES.includes(aThemeName)) {
-    return "chrome://messenger-messagestyles/skin/" + aThemeName + "/";
-  }
-  return "chrome://" + aThemeName + "/skin/";
-}
-
-export function getThemeByName(aName) {
-  const baseURI = getChromeBaseURI(aName);
-  const metadata = getInfoPlistContent(baseURI);
-  if (!metadata) {
-    throw new Error("Cannot load theme " + aName);
-  }
-
-  return {
-    name: aName,
-    variant: "default",
-    baseURI,
-    metadata,
-    html: new HTMLTheme(baseURI),
-    combineConsecutive: lazy.gPrefBranch.getBoolPref(kCombineConsecutivePref),
-    combineConsecutiveInterval: lazy.gPrefBranch.getIntPref(
-      kCombineConsecutiveIntervalPref
-    ),
-  };
-}
-
-export function getCurrentTheme() {
-  const name = lazy.gPrefBranch.getCharPref(kThemePref);
-  const variant = lazy.gPrefBranch.getCharPref(kVariantPref);
-  if (
-    gCurrentTheme &&
-    gCurrentTheme.name == name &&
-    gCurrentTheme.variant == variant
-  ) {
-    return gCurrentTheme;
-  }
-
-  try {
-    gCurrentTheme = getThemeByName(name);
-    gCurrentTheme.variant = variant;
-  } catch (e) {
-    console.error(e);
-    gCurrentTheme = getThemeByName(DEFAULT_THEME);
-    gCurrentTheme.variant = "default";
-  }
-
-  return gCurrentTheme;
-}
-
-function getDirectoryEntries(aDir) {
-  let uri = Services.io.newURI(aDir);
-  const cr = Cc["@mozilla.org/chrome/chrome-registry;1"].getService(
-    Ci.nsIXULChromeRegistry
-  );
-  while (uri.scheme == "chrome") {
-    uri = cr.convertChromeURL(uri);
-  }
-
-  // remove any trailing file name added by convertChromeURL
-  const spec = uri.spec.replace(/[^\/]+$/, "");
-  uri = Services.io.newURI(spec);
-
-  const results = [];
-  if (uri.scheme == "jar") {
-    uri.QueryInterface(Ci.nsIJARURI);
-    const strEntry = uri.JAREntry;
-    if (!strEntry) {
-      return [];
-    }
-
-    const zr = Cc["@mozilla.org/libjar/zip-reader;1"].createInstance(
-      Ci.nsIZipReader
-    );
-    const jarFile = uri.JARFile;
-    if (jarFile instanceof Ci.nsIJARURI) {
-      const innerZr = Cc["@mozilla.org/libjar/zip-reader;1"].createInstance(
-        Ci.nsIZipReader
-      );
-      innerZr.open(jarFile.JARFile.QueryInterface(Ci.nsIFileURL).file);
-      zr.openInner(innerZr, jarFile.JAREntry);
-    } else {
-      zr.open(jarFile.QueryInterface(Ci.nsIFileURL).file);
-    }
-
-    if (!zr.hasEntry(strEntry) || !zr.getEntry(strEntry).isDirectory) {
-      zr.close();
-      return [];
-    }
-
-    const escapedEntry = strEntry.replace(/([*?$[\]^~()\\])/g, "\\$1");
-    const filter = escapedEntry + "?*~" + escapedEntry + "?*/?*";
-    const entries = zr.findEntries(filter);
-
-    const parentLength = strEntry.length;
-    for (const entry of entries) {
-      results.push(entry.substring(parentLength));
-    }
-    zr.close();
-  } else if (uri.scheme == "file") {
-    uri.QueryInterface(Ci.nsIFileURL);
-    const dir = uri.file;
-
-    if (!dir.exists() || !dir.isDirectory()) {
-      return [];
-    }
-
-    for (const file of dir.directoryEntries) {
-      results.push(file.leafName);
-    }
-  }
-
-  return results;
-}
-
-export function getThemeVariants(aTheme) {
-  const variants = getDirectoryEntries(aTheme.baseURI + "Variants/");
-  return variants
-    .filter(v => v.endsWith(".css"))
-    .map(v => v.substring(0, v.length - 4));
-}
-
-/* helper function for replacements in messages */
-function getBuddyFromMessage(aMsg) {
   if (aMsg.incoming) {
-    const conv = aMsg.conversation;
-    if (!conv.isChat) {
-      return conv.buddy;
-    }
+    msgClass.push("incoming");
+  } else if (aMsg.outgoing) {
+    msgClass.push("outgoing");
   }
 
-  return null;
-}
-
-function getStatusIconFromBuddy(aBuddy) {
-  let status = "unknown";
-  if (aBuddy) {
-    if (!aBuddy.online) {
-      status = "offline";
-    } else if (aBuddy.idle) {
-      status = "idle";
-    } else if (!aBuddy.available) {
-      status = "away";
-    } else {
-      status = "available";
-    }
+  if (aMsg.action) {
+    msgClass.push("action");
+  }
+  if (aMsg.autoResponse) {
+    msgClass.push("autoreply");
+  }
+  if (aMsg.containsNick) {
+    msgClass.push("nick");
+  }
+  if (aMsg.error) {
+    msgClass.push("error");
+  }
+  if (aMsg.delayed) {
+    msgClass.push("delayed");
+  }
+  if (aMsg.notification) {
+    msgClass.push("notification");
+  }
+  if (aMsg.noFormat) {
+    msgClass.push("monospaced");
+  }
+  if (aMsg.noCollapse) {
+    msgClass.push("no-collapse");
   }
 
-  return "chrome://chat/skin/" + status + "-16.png";
-}
+  // Future states, reserved until the corresponding message flags exist.
+  if (aMsg.pending) {
+    msgClass.push("pending");
+  }
+  if (aMsg.deleted) {
+    msgClass.push("deleted");
+  }
+  if (aMsg.edited) {
+    msgClass.push("edited");
+  }
 
-var footerReplacements = {
-  chatName: aConv => lazy.TXTToHTML(aConv.title),
-  sourceName: aConv =>
-    lazy.TXTToHTML(aConv.account.alias || aConv.account.name),
-  destinationName: aConv => lazy.TXTToHTML(aConv.name),
-  destinationDisplayName: aConv => lazy.TXTToHTML(aConv.title),
-  incomingIconPath(aConv) {
-    let buddy;
-    return (
-      (!aConv.isChat && (buddy = aConv.buddy) && buddy.buddyIconFilename) ||
-      "incoming_icon.png"
-    );
-  },
-  outgoingIconPath: () => "outgoing_icon.png",
-  timeOpened(aConv, aFormat) {
-    const date = new Date(aConv.startDate / 1000);
-    if (aFormat) {
-      return lazy.ToLocaleFormat(aFormat, date);
-    }
-    return lazy.gTimeFormatter.format(date);
-  },
-};
+  if (isNext) {
+    msgClass.push("consecutive");
+  }
+  if (isContext) {
+    msgClass.push("context");
+  }
+
+  return msgClass.join(" ");
+}
 
 function formatAutoResponce(aTxt) {
   return lazy.l10n.formatValueSync("auto-reply", { message: aTxt });
 }
 
-var statusMessageReplacements = {
-  message: aMsg =>
-    '<span class="ib-msg-txt">' +
-    (aMsg.autoResponse ? formatAutoResponce(aMsg.message) : aMsg.message) +
-    "</span>",
-  time(aMsg, aFormat) {
-    const date = new Date(aMsg.time * 1000);
-    if (aFormat) {
-      return lazy.ToLocaleFormat(aFormat, date);
-    }
-    return lazy.gTimeFormatter.format(date);
-  },
-  timestamp: aMsg => aMsg.time,
-  shortTime(aMsg) {
-    return lazy.gTimeFormatter.format(new Date(aMsg.time * 1000));
-  },
-  messageClasses(aMsg) {
-    const msgClass = [];
-
-    if (aMsg.system) {
-      msgClass.push("event");
-    } else {
-      msgClass.push("message");
-
-      if (aMsg.incoming) {
-        msgClass.push("incoming");
-      } else if (aMsg.outgoing) {
-        msgClass.push("outgoing");
-      }
-
-      if (aMsg.action) {
-        msgClass.push("action");
-      }
-
-      if (aMsg.autoResponse) {
-        msgClass.push("autoreply");
-      }
-    }
-
-    if (aMsg.containsNick) {
-      msgClass.push("nick");
-    }
-    if (aMsg.error) {
-      msgClass.push("error");
-    }
-    if (aMsg.delayed) {
-      msgClass.push("delayed");
-    }
-    if (aMsg.notification) {
-      msgClass.push("notification");
-    }
-    if (aMsg.noFormat) {
-      msgClass.push("monospaced");
-    }
-    if (aMsg.noCollapse) {
-      msgClass.push("no-collapse");
-    }
-
-    return msgClass.join(" ");
-  },
-};
-
-function formatSender(aName, isEncrypted = false) {
-  const otr = isEncrypted ? " message-encrypted" : "";
-  return `<span class="ib-sender${otr}">${lazy.TXTToHTML(aName)}</span>`;
-}
-var messageReplacements = {
-  userIconPath(aMsg) {
-    // If the protocol plugin provides an icon for the message, use it.
-    let iconURL = aMsg.iconURL;
-    if (iconURL) {
-      return iconURL;
-    }
-
-    // For outgoing messages, use the current user icon.
-    if (aMsg.outgoing) {
-      iconURL = aMsg.conversation.account.statusInfo.getUserIcon();
-      if (iconURL) {
-        return iconURL.spec;
-      }
-    }
-
-    // Fallback to the theme's default icons.
-    return (aMsg.incoming ? "Incoming" : "Outgoing") + "/buddy_icon.svg";
-  },
-  senderScreenName: aMsg => formatSender(aMsg.who, aMsg.isEncrypted),
-  sender: aMsg => formatSender(aMsg.alias || aMsg.who, aMsg.isEncrypted),
-  senderColor: aMsg => aMsg.color,
-  senderStatusIcon: aMsg => getStatusIconFromBuddy(getBuddyFromMessage(aMsg)),
-  messageDirection: () => "ltr",
-  // no theme actually use this, don't bother making sure this is the real
-  // serverside alias
-  senderDisplayName: aMsg =>
-    formatSender(aMsg.alias || aMsg.who, aMsg.isEncrypted),
-  service: aMsg => aMsg.conversation.account.protocol.name,
-  textbackgroundcolor: () => "transparent", // FIXME?
-  __proto__: statusMessageReplacements,
-};
-
-var statusReplacements = {
-  status: () => "", // FIXME
-  statusIcon(aMsg) {
-    const conv = aMsg.conversation;
-    let buddy = null;
-    if (!conv.isChat) {
-      buddy = conv.buddy;
-    }
-    return getStatusIconFromBuddy(buddy);
-  },
-  __proto__: statusMessageReplacements,
-};
-
-var kReplacementRegExp = /%([a-zA-Z]*)(\{([^\}]*)\})?%/g;
-
-function replaceKeywordsInHTML(aHTML, aReplacements, aReplacementArg) {
-  kReplacementRegExp.lastIndex = 0;
-  let previousIndex = 0;
-  let result = "";
-  let match;
-  while ((match = kReplacementRegExp.exec(aHTML))) {
-    let content = "";
-    if (match[1] in aReplacements) {
-      content = aReplacements[match[1]](aReplacementArg, match[3]);
-    } else {
-      console.error(
-        "Unknown replacement string %" + match[1] + "% in message styles."
-      );
-    }
-    result += aHTML.substring(previousIndex, match.index) + content;
-    previousIndex = kReplacementRegExp.lastIndex;
+/**
+ * Get the URL of the icon to display next to a message, if any.
+ *
+ * @param {imIMessage} aMsg
+ * @returns {string} The icon URL, or an empty string.
+ */
+function getUserIconSrc(aMsg) {
+  // If the protocol plugin provides an icon for the message, use it.
+  const iconURL = aMsg.iconURL;
+  if (iconURL) {
+    return iconURL;
   }
 
-  return result + aHTML.slice(previousIndex);
+  // For outgoing messages, use the current user icon.
+  if (aMsg.outgoing) {
+    const userIcon = aMsg.conversation.account.statusInfo.getUserIcon();
+    if (userIcon) {
+      return userIcon.spec;
+    }
+  }
+
+  return "";
 }
 
 /**
  * Determine if a message should be grouped with a previous message.
  *
- * @param {object} aTheme - The theme the messages will be displayed in.
  * @param {imIMessage} aMsg - The message that is about to be appended.
  * @param {imIMessage} aPreviousMsg - The last message that was displayed.
  * @returns {boolean} If the message should be grouped with the previous one.
  */
-export function isNextMessage(aTheme, aMsg, aPreviousMsg) {
+export function isNextMessage(aMsg, aPreviousMsg) {
   if (
-    !aTheme.combineConsecutive ||
-    (hasMetadataKey(aTheme, "DisableCombineConsecutive") &&
-      getMetadata(aTheme, "DisableCombineConsecutive"))
+    !Services.prefs.getBoolPref(
+      "messenger.options.messagesStyle.combineConsecutive",
+      true
+    )
   ) {
     return false;
   }
@@ -579,9 +168,11 @@ export function isNextMessage(aTheme, aMsg, aPreviousMsg) {
   }
 
   const timeDifference = aMsg.time - aPreviousMsg.time;
-  return (
-    timeDifference >= 0 && timeDifference <= aTheme.combineConsecutiveInterval
+  const interval = Services.prefs.getIntPref(
+    "messenger.options.messagesStyle.combineConsecutiveInterval",
+    300
   );
+  return timeDifference >= 0 && timeDifference <= interval;
 }
 
 /**
@@ -604,36 +195,146 @@ export function wasNextMessage(msg, doc) {
  * Create an HTML string to insert the message into the conversation.
  *
  * @param {imIMessage} aMsg
- * @param {object} aTheme
- * @param {boolean} aIsNext - If this message is immediately following a
- *   message of the same origin. Used for visual grouping.
- * @param {boolean} aIsContext - If this message was already read by the user
- *   previously and just provided for context.
+ * @param {object} [options]
+ * @param {boolean} [options.isNext] - If this message is immediately following
+ *   a message of the same origin. Used for visual grouping.
+ * @param {boolean} [options.isContext] - If this message was already read by
+ *   the user previously and just provided for context.
  * @returns {string} Raw HTML for the message.
  */
-export function getHTMLForMessage(aMsg, aTheme, aIsNext, aIsContext) {
-  let html, replacements;
+export function getHTMLForMessage(
+  aMsg,
+  { isNext = false, isContext = false } = {}
+) {
+  const className = getMessageClasses(aMsg, isNext, isContext);
+  const content = `<span class="ib-msg-txt">${
+    aMsg.autoResponse ? formatAutoResponce(aMsg.message) : aMsg.message
+  }</span>`;
+  const formattedTime = formatTime(aMsg, "%H:%M");
+
   if (aMsg.system) {
-    html = aIsNext ? aTheme.html.statusNext : aTheme.html.status;
-    replacements = statusReplacements;
-  } else {
-    html = aMsg.incoming ? "incoming" : "outgoing";
-    if (aIsNext) {
-      html += "Next";
+    // System messages are shown as compact rows. Consecutive system messages
+    // are grouped: the first one creates a .message.event group container and
+    // the following ones are inserted into it as flat .event-row siblings, so
+    // that the shared conversation code can collapse the group.
+    const row = `<div class="event-row ${className}" data-prpl="${
+      aMsg.conversation.account.protocol.name
+    }" data-time="${aMsg.time}">
+      <div class="message-sidebar">
+        <time class="message-time">${formattedTime}</time>
+      </div>
+      <div class="message-body">
+        <div class="message-content">${content}</div>
+      </div>
+      <footer class="message-footer" hidden></footer>
+    </div>`;
+    if (isNext) {
+      // The row and the insert anchor must be siblings so the next event is
+      // inserted into the group instead of nesting inside the previous row.
+      return `${row}<div id="insert"></div>`;
     }
-    html += aIsContext ? "Context" : "Content";
-    html = aTheme.html[html];
-    replacements = messageReplacements;
-    if (aMsg.action) {
-      let actionMessageTemplate = "* %message% *";
-      if (hasMetadataKey(aTheme, "ActionMessageTemplate")) {
-        actionMessageTemplate = getMetadata(aTheme, "ActionMessageTemplate");
-      }
-      html = html.replace(/%message%/g, actionMessageTemplate);
-    }
+    return `<div class="message event ${className}" data-prpl="${
+      aMsg.conversation.account.protocol.name
+    }" data-time="${aMsg.time}">
+      ${row}
+      <div id="insert"></div>
+    </div>`;
   }
 
-  return replaceKeywordsInHTML(html, replacements, aMsg);
+  const avatar = getUserIconSrc(aMsg);
+  const sender = `<span class="ib-sender">${lazy.TXTToHTML(
+    aMsg.alias || aMsg.who
+  )}</span>`;
+  const senderTime = `<time class="message-sender-time">${formattedTime}</time>`;
+  const encrypted = aMsg.isEncrypted ? " message-encrypted" : "";
+  // Expose the sender color to CSS so the bubbles style can tint the bubble.
+  const senderColor = aMsg.color
+    ? ` style="--sender-color: ${aMsg.color.replace(/^\s*color\s*:\s*/, "").replace(/;\s*$/, "")}"`
+    : "";
+
+  // Normal messages have no insert anchor: consecutive messages are appended
+  // as flat siblings and the consecutive class controls their visual grouping,
+  // as in the previous themes.
+  return `<div class="message ${className}" data-prpl="${
+    aMsg.conversation.account.protocol.name
+  }" data-time="${aMsg.time}"${senderColor}>
+    <div class="message-sidebar">
+      ${avatar ? `<img class="message-avatar" src="${avatar}" alt="">` : ""}
+      <time class="message-time">${formattedTime}</time>
+    </div>
+    <div class="message-body">
+      <span class="message-sender${encrypted}" style="${aMsg.color}">${sender}${senderTime}</span>
+      <div class="message-content">${content}</div>
+    </div>
+      <footer class="message-footer" hidden></footer>
+  </div>`;
+}
+
+/**
+ * Initialize the HTML document of a conversation browser.
+ *
+ * @param {prplIConversation} aConv
+ * @param {DOMDocument} aDoc - The document of the conversation browser.
+ * @param {object} [options]
+ * @param {boolean} [options.bubbles] - If the bubbles style is enabled.
+ * @param {boolean} [options.avatars] - If avatars are enabled.
+ */
+export function initHTMLDocument(
+  aConv,
+  aDoc,
+  { bubbles = false, avatars = false } = {}
+) {
+  // Screen readers may read the title of the document, so provide one
+  // to avoid an ugly fallback to the URL (see bug 1165).
+  aDoc.title = aConv.title;
+
+  function addCSS(aHref) {
+    const link = aDoc.createElement("link");
+    link.setAttribute("rel", "stylesheet");
+    link.setAttribute("href", aHref);
+    link.setAttribute("type", "text/css");
+    aDoc.head.appendChild(link);
+  }
+  addCSS("chrome://chat/skin/conv.css");
+  addCSS("chrome://messenger/skin/icons.css");
+  addCSS("chrome://messenger/skin/colors.css");
+  addCSS("chrome://messenger/skin/layout.css");
+  addCSS("chrome://messenger/skin/spacings.css");
+  addCSS("chrome://chat/skin/bubbles.css");
+  aDoc.body.id = "ibcontent";
+
+  const frag = getDocumentFragmentFromHTML(
+    aDoc,
+    '<div id="Chat" aria-live="polite"></div>'
+  );
+  aDoc.body.appendChild(frag);
+  applyDisplayOptions(aDoc, { bubbles, avatars });
+
+  const scriptTag = aDoc.createElement("script");
+  scriptTag.src = "chrome://chat/content/conversation-behavior.js";
+  aDoc.body.appendChild(scriptTag);
+
+  aDoc.defaultView.convertTimeUnits = lazy.DownloadUtils.convertTimeUnits;
+}
+
+/**
+ * Update the display options of a conversation document without reloading it.
+ *
+ * @param {DOMDocument} aDoc - The document of the conversation browser.
+ * @param {object} [options]
+ * @param {boolean} [options.bubbles] - If the bubbles style is enabled.
+ * @param {boolean} [options.avatars] - If avatars are enabled.
+ */
+export function applyDisplayOptions(
+  aDoc,
+  { bubbles = false, avatars = false } = {}
+) {
+  const chat = aDoc.getElementById("Chat");
+  if (!chat) {
+    return;
+  }
+  chat.dataset.bubbles = bubbles;
+  chat.dataset.avatars = avatars;
 }
 
 /**
@@ -773,95 +474,6 @@ export function removeMessage(remoteId, doc) {
   range.setStartBefore(message[0]);
   range.setEndAfter(message[message.length - 1]);
   range.deleteContents();
-}
-
-function hasMetadataKey(aTheme, aKey) {
-  return (
-    aKey in aTheme.metadata ||
-    (aTheme.variant != "default" &&
-      aKey + ":" + aTheme.variant in aTheme.metadata) ||
-    ("DefaultVariant" in aTheme.metadata &&
-      aKey + ":" + aTheme.metadata.DefaultVariant in aTheme.metadata)
-  );
-}
-
-function getMetadata(aTheme, aKey) {
-  if (
-    aTheme.variant != "default" &&
-    aKey + ":" + aTheme.variant in aTheme.metadata
-  ) {
-    return aTheme.metadata[aKey + ":" + aTheme.variant];
-  }
-
-  if (
-    "DefaultVariant" in aTheme.metadata &&
-    aKey + ":" + aTheme.metadata.DefaultVariant in aTheme.metadata
-  ) {
-    return aTheme.metadata[aKey + ":" + aTheme.metadata.DefaultVariant];
-  }
-
-  return aTheme.metadata[aKey];
-}
-
-export function initHTMLDocument(aConv, aTheme, aDoc) {
-  const base = aDoc.createElement("base");
-  base.href = aTheme.baseURI;
-  aDoc.head.appendChild(base);
-
-  // Screen readers may read the title of the document, so provide one
-  // to avoid an ugly fallback to the URL (see bug 1165).
-  aDoc.title = aConv.title;
-
-  function addCSS(aHref) {
-    const link = aDoc.createElement("link");
-    link.setAttribute("rel", "stylesheet");
-    link.setAttribute("href", aHref);
-    link.setAttribute("type", "text/css");
-    aDoc.head.appendChild(link);
-  }
-  addCSS("chrome://chat/skin/conv.css");
-  addCSS("chrome://messenger/skin/icons.css");
-  addCSS("chrome://messenger/skin/colors.css");
-  addCSS("chrome://messenger/skin/layout.css");
-  addCSS("chrome://messenger/skin/spacings.css");
-
-  // add css to handle DefaultFontFamily and DefaultFontSize
-  let cssText = "";
-  if (hasMetadataKey(aTheme, "DefaultFontFamily")) {
-    cssText += "font-family: " + getMetadata(aTheme, "DefaultFontFamily") + ";";
-  }
-  if (hasMetadataKey(aTheme, "DefaultFontSize")) {
-    cssText += "font-size: " + getMetadata(aTheme, "DefaultFontSize") + ";";
-  }
-  if (cssText) {
-    addCSS("data:text/css,*{ " + cssText + " }");
-  }
-
-  // add the main CSS file of the theme
-  if (aTheme.metadata.MessageViewVersion >= 3 || aTheme.variant == "default") {
-    addCSS("main.css");
-  }
-
-  // add the CSS file of the variant
-  if (aTheme.variant != "default") {
-    addCSS("Variants/" + aTheme.variant + ".css");
-  } else if ("DefaultVariant" in aTheme.metadata) {
-    addCSS("Variants/" + aTheme.metadata.DefaultVariant + ".css");
-  }
-  aDoc.body.id = "ibcontent";
-
-  // We insert the whole content of body: chat div, footer
-  let html = '<div id="Chat" aria-live="polite"></div>';
-  html += replaceKeywordsInHTML(aTheme.html.footer, footerReplacements, aConv);
-
-  const frag = getDocumentFragmentFromHTML(aDoc, html);
-  aDoc.body.appendChild(frag);
-  if (!aTheme.metadata.NoScript) {
-    const scriptTag = aDoc.createElement("script");
-    scriptTag.src = "inline.js";
-    aDoc.body.appendChild(scriptTag);
-  }
-  aDoc.defaultView.convertTimeUnits = lazy.DownloadUtils.convertTimeUnits;
 }
 
 /* Selection stuff */
@@ -1154,38 +766,26 @@ SelectedMessage.prototype = {
       text = serializeNode(div);
     }
 
-    // then get the suitable replacements and templates for this message
-    let html, replacements;
+    // then get the suitable template for this message
+    let template;
     if (msg.system) {
-      replacements = statusReplacements;
-      html = lazy.l10n.formatValueSync(
+      template = lazy.l10n.formatValueSync(
         "messenger-conversations-selections-system-messages-template"
       );
+    } else if (msg.action) {
+      template = lazy.l10n.formatValueSync(
+        "messenger-conversations-selections-action-messages-template"
+      );
     } else {
-      replacements = messageReplacements;
-      if (msg.action) {
-        html = lazy.l10n.formatValueSync(
-          "messenger-conversations-selections-action-messages-template"
-        );
-      } else {
-        html = lazy.l10n.formatValueSync(
-          "messenger-conversations-selections-content-messages-template"
-        );
-      }
+      template = lazy.l10n.formatValueSync(
+        "messenger-conversations-selections-content-messages-template"
+      );
     }
 
-    // Overrides default replacements so that they don't add a span node.
-    // Also, this uses directly the text variable so that we don't
-    // have to change the content of msg.message and revert it
-    // afterwards.
-    replacements = {
-      message: () => text,
-      sender: aMsg => aMsg.alias || aMsg.who,
-      __proto__: replacements,
-    };
-
-    // Finally, let the theme system do the magic!
-    return replaceKeywordsInHTML(html, replacements, msg);
+    return template
+      .replace("%time%", formatTime(msg))
+      .replace("%sender%", msg.alias || msg.who)
+      .replace("%message%", text);
   },
 };
 

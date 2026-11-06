@@ -23,8 +23,8 @@ Preferences.addAll([
   { id: "mail.chat.play_sound.type", type: "int" },
   { id: "mail.chat.play_sound.url", type: "string" },
   { id: "messenger.options.getAttentionOnNewMessages", type: "bool" },
-  { id: "messenger.options.messagesStyle.theme", type: "string" },
-  { id: "messenger.options.messagesStyle.variant", type: "string" },
+  { id: "messenger.options.messagesStyle.bubbles", type: "bool" },
+  { id: "messenger.options.messagesStyle.avatars", type: "bool" },
 ]);
 
 var { makeMozIconImageSet } = ChromeUtils.importESModule(

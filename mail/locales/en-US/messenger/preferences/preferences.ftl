@@ -1199,9 +1199,10 @@ chat-browse-sound-button =
     .label = Browse…
     .accesskey = B
 
-theme-label =
-    .value = Theme:
-    .accesskey = T
+chat-bubbles-label =
+    .label = Use bubbles for chat messages
+    .accesskey = b
+chat-bubbles-description = Display messages in colored bubbles instead of plain text.
 
 ## Content of the preview conversation for chat message styles.
 
@@ -1215,24 +1216,14 @@ chat-theme-preview-message-1 = Hi! :-)
 chat-theme-preview-message-2 = What’s up?
 chat-theme-preview-message-3 = I’m trying { -brand-short-name }! ;-)
 
-style-mail =
-    .label = { -brand-short-name }
-style-bubbles =
-    .label = Bubbles
-style-dark =
-    .label = Dark
-style-paper =
-    .label = Paper Sheets
-style-simple =
-    .label = Simple
+chat-avatars-label =
+    .label = Show avatars next to chat messages
+    .accesskey = v
+chat-avatars-description = Display the conversation participants' avatar pictures.
 
 preview-label = Preview:
 no-preview-label = No preview available
 no-preview-description = This theme is not valid or is currently unavailable (disabled addon, safe-mode, …).
-
-chat-variant-label =
-    .value = Variant:
-    .accesskey = V
 
 # This is used to determine the width of the search field in about:preferences,
 # in order to make the entire placeholder string visible

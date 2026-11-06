@@ -2,19 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const THEME_PREF = "messenger.options.messagesStyle.theme";
-const VARIANT_PREF = "messenger.options.messagesStyle.variant";
+const BUBBLES_PREF = "messenger.options.messagesStyle.bubbles";
+const AVATARS_PREF = "messenger.options.messagesStyle.avatars";
 
-add_task(async function testMessageStyleChangeReloadsConversation() {
-  const defaultVariant = "default";
-  const newVariant = "Blue_-_Green";
+add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
     set: [
-      [THEME_PREF, "bubbles"],
-      [VARIANT_PREF, defaultVariant],
+      [BUBBLES_PREF, false],
+      [AVATARS_PREF, false],
     ],
   });
+});
 
+add_task(async function testDisplayOptionsChangeOpenConversation() {
   const account = IMServices.accounts.createAccount(
     "testuser",
     "prpl-mochitest"
@@ -51,60 +51,64 @@ add_task(async function testMessageStyleChangeReloadsConversation() {
     "message added to conv"
   );
 
-  let reloaded = waitForConversationLoad(chatConv.convBrowser);
-  let redisplayed = BrowserTestUtils.waitForEvent(
-    chatConv.convBrowser,
-    "MessagesDisplayed"
-  );
-  await SpecialPowers.pushPrefEnv({ set: [[VARIANT_PREF, newVariant]] });
-  await reloaded;
-  await redisplayed;
+  const contentDocument = chatConv.convBrowser.contentDocument;
+  const chatNode = chatConv.convBrowser.contentChatNode;
+  is(chatNode.dataset.bubbles, "false", "the bubbles style is off");
+  is(chatNode.dataset.avatars, "false", "avatars are off");
 
-  is(
-    chatConv.convBrowser.theme.variant,
-    newVariant,
-    "conversation browser picked up the new variant"
+  await SpecialPowers.pushPrefEnv({ set: [[BUBBLES_PREF, true]] });
+  await TestUtils.waitForCondition(
+    () => chatNode.dataset.bubbles == "true",
+    "the open conversation picks up the bubbles style"
   );
-  ok(
-    chatConv.convBrowser.contentDocument.querySelector(
-      `link[href="Variants/${newVariant}.css"]`
-    ),
-    "stylesheet of the new variant is in the conversation document"
+  is(chatNode.dataset.avatars, "false", "avatars are still off");
+  is(
+    chatConv.convBrowser.contentDocument,
+    contentDocument,
+    "the conversation was updated without reloading"
   );
   Assert.stringContains(
     chatConv.convBrowser.contentChatNode.textContent,
     "hello world",
-    "message redisplayed after the reload"
+    "message still displayed after enabling bubbles"
+  );
+
+  await SpecialPowers.pushPrefEnv({ set: [[AVATARS_PREF, true]] });
+  await TestUtils.waitForCondition(
+    () => chatNode.dataset.avatars == "true",
+    "the open conversation picks up avatars"
+  );
+  is(chatNode.dataset.bubbles, "true", "the bubbles style is still on");
+  Assert.stringContains(
+    chatConv.convBrowser.contentChatNode.textContent,
+    "hello world",
+    "message still displayed after enabling avatars"
   );
 
   const messageDisplayed = BrowserTestUtils.waitForEvent(
     chatConv.convBrowser,
     "MessagesDisplayed"
   );
-  conversation.writeMessage("mochitest", "after the reload", {
+  conversation.writeMessage("mochitest", "after the change", {
     incoming: true,
   });
   await messageDisplayed;
 
   Assert.stringContains(
     chatConv.convBrowser.contentChatNode.textContent,
-    "after the reload",
-    "message received after the reload is displayed"
+    "after the change",
+    "message received after the prefs changed is displayed"
   );
 
-  reloaded = waitForConversationLoad(chatConv.convBrowser);
-  redisplayed = BrowserTestUtils.waitForEvent(
-    chatConv.convBrowser,
-    "MessagesDisplayed"
+  await SpecialPowers.popPrefEnv();
+  await TestUtils.waitForCondition(
+    () => chatNode.dataset.avatars == "false",
+    "the open conversation drops avatars"
   );
   await SpecialPowers.popPrefEnv();
-  await reloaded;
-  await redisplayed;
-
-  is(
-    chatConv.convBrowser.theme.variant,
-    defaultVariant,
-    "conversation browser is back on the default variant"
+  await TestUtils.waitForCondition(
+    () => chatNode.dataset.bubbles == "false",
+    "the open conversation drops the bubbles style"
   );
 
   conversation.close();
